@@ -1,3 +1,4 @@
+const Company = require('../models/Company');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 
@@ -77,4 +78,19 @@ const getMe = async (req, res) => {
 
 
 
-module.exports = { register, login, getMe };
+const setupCompany = async (req, res) => {
+  try {
+    const { name, email, phone, address } = req.body;
+
+    const company = await Company.create({ name, email, phone, address });
+
+    // Link company to current user
+    await User.findByIdAndUpdate(req.user._id, { companyId: company._id });
+
+    res.status(201).json({ success: true, company });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { register, login, getMe, setupCompany };
