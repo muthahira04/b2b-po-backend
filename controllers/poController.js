@@ -4,16 +4,28 @@ const User = require('../models/User');
 
 const getApprovalChain = async (amount, companyId) => {
   const approvers = [];
+
   if (amount < 50000) {
-    const approver = await User.findOne({ companyId, role: 'approver' });
+    let approver = await User.findOne({ companyId, role: 'approver' });
+    // Fallback to admin if no approver found
+    if (!approver) approver = await User.findOne({ companyId, role: 'admin' });
     if (approver) approvers.push({ approverId: approver._id, status: 'pending' });
+
   } else if (amount >= 50000 && amount < 500000) {
-    const allApprovers = await User.find({ companyId, role: 'approver' }).limit(2);
+    let allApprovers = await User.find({ companyId, role: 'approver' }).limit(2);
+    // Fallback to admin if not enough approvers
+    if (allApprovers.length === 0) {
+      const admin = await User.findOne({ companyId, role: 'admin' });
+      if (admin) allApprovers = [admin];
+    }
     allApprovers.forEach(a => approvers.push({ approverId: a._id, status: 'pending' }));
+
   } else {
+    // High value — always goes to admin
     const admin = await User.findOne({ companyId, role: 'admin' });
     if (admin) approvers.push({ approverId: admin._id, status: 'pending' });
   }
+
   return approvers;
 };
 
