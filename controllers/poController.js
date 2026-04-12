@@ -212,12 +212,12 @@ const getStats = async (req, res) => {
     const approvedPOs = await PurchaseOrder.countDocuments({ companyId, status: 'approved' });
     const fulfilledPOs = await PurchaseOrder.countDocuments({ companyId, status: 'fulfilled' });
     const spendResult = await PurchaseOrder.aggregate([
-      { $match: { companyId, status: { $in: ['approved', 'fulfilled', 'sent_to_vendor'] } } },
+      { $match: { companyId, status: { $in: ['approved', 'sent_to_vendor', 'fulfilled', 'partially_fulfilled'] } } },
       { $group: { _id: null, totalSpend: { $sum: '$totalAmount' } } }
     ]);
     const totalSpend = spendResult[0]?.totalSpend || 0;
     const monthlySpend = await PurchaseOrder.aggregate([
-      { $match: { companyId } },
+      { $match: { companyId, status: { $in: ['approved', 'sent_to_vendor', 'fulfilled', 'partially_fulfilled'] } } },
       {
         $group: {
           _id: { month: { $month: '$createdAt' }, year: { $year: '$createdAt' } },

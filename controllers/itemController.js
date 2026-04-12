@@ -1,8 +1,6 @@
 const Item = require('../models/Item');
 
-// @desc    Get all items
-// @route   GET /api/items
-exports.getItems = async (req, res) => {
+const getItems = async (req, res) => {
   try {
     const items = await Item.find({ companyId: req.user.companyId });
     res.status(200).json({ success: true, count: items.length, items });
@@ -11,9 +9,7 @@ exports.getItems = async (req, res) => {
   }
 };
 
-// @desc    Get single item
-// @route   GET /api/items/:id
-exports.getItem = async (req, res) => {
+const getItem = async (req, res) => {
   try {
     const item = await Item.findById(req.params.id);
     if (!item) {
@@ -25,9 +21,7 @@ exports.getItem = async (req, res) => {
   }
 };
 
-// @desc    Create item
-// @route   POST /api/items
-exports.createItem = async (req, res) => {
+const createItem = async (req, res) => {
   try {
     const item = await Item.create({
       ...req.body,
@@ -39,9 +33,7 @@ exports.createItem = async (req, res) => {
   }
 };
 
-// @desc    Update item
-// @route   PUT /api/items/:id
-exports.updateItem = async (req, res) => {
+const updateItem = async (req, res) => {
   try {
     const item = await Item.findByIdAndUpdate(
       req.params.id,
@@ -57,9 +49,7 @@ exports.updateItem = async (req, res) => {
   }
 };
 
-// @desc    Delete item
-// @route   DELETE /api/items/:id
-exports.deleteItem = async (req, res) => {
+const deleteItem = async (req, res) => {
   try {
     const item = await Item.findByIdAndDelete(req.params.id);
     if (!item) {
@@ -70,3 +60,5 @@ exports.deleteItem = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+module.exports = { getItems, getItem, createItem, updateItem, deleteItem };
