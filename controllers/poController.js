@@ -63,12 +63,45 @@ const getPO = async (req, res) => {
 
 const createPO = async (req, res) => {
   try {
-    const { vendorId, items, expectedDelivery, deliveryAddress, notes } = req.body;
+    const { vendorId, items, expectedDelivery, deliveryAddress, notes, department } = req.body;
     const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
     const mappedItems = items.map(item => ({
       ...item,
       totalPrice: item.quantity * item.unitPrice
     }));
+
+    // Budget check
+    let budgetExceeded = false;
+    const Company = require('../models/Company');
+    const User = require('../models/User');
+    
+    const company = await Company.findById(req.user.companyId);
+    if (company && department) {
+      const dept = company.departments.find(d => d.name === department);
+      if (dept) {
+        const remainingBudget = dept.monthlyBudget - dept.spent;
+        if (totalAmount > remainingBudget) {
+          budgetExceeded = true;
+        }
+      }
+    }
+
+    // Build approval chain - get all approvers, managers, admins
+    const approvalChain = [];
+    const approvers = await User.find({ 
+      companyId: req.user.companyId,
+      role: { $in: ['approver', 'manager', 'admin'] }
+    }).sort({ role: 1 });
+
+    // Add each approver to the chain
+    for (const approver of approvers) {
+      approvalChain.push({
+        approver: approver._id,
+        status: 'pending',
+        level: approvalChain.length + 1
+      });
+    }
+
     const po = await PurchaseOrder.create({
       companyId: req.user.companyId,
       vendorId,
@@ -78,9 +111,17 @@ const createPO = async (req, res) => {
       expectedDelivery,
       deliveryAddress,
       notes,
-      status: 'draft'
+      department,
+      status: 'draft',
+      budgetExceeded,
+      approvalChain: approvalChain  // Use approvalChain field
     });
-    res.status(201).json({ success: true, po });
+
+    res.status(201).json({
+      success: true,
+      po,
+      budgetWarning: budgetExceeded ? 'This PO exceeds the department budget!' : null
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -105,28 +146,57 @@ const submitPO = async (req, res) => {
   }
 };
 
+// @desc    Approve PO (for multi-level approval)
+// @route   PUT /api/po/:id/approve
+// @access  Private (approver/manager/admin)
 const approvePO = async (req, res) => {
   try {
-    const { comment } = req.body;
-    const po = await PurchaseOrder.findById(req.params.id);
+    const po = await PurchaseOrder.findById(req.params.id)
+      .populate('vendorId', 'name')  // Change from 'vendor' to 'vendorId'
+      .populate('items.item', 'name')
+      .populate('approvalChain.approver', 'name email role');
+
     if (!po) {
-      return res.status(404).json({ success: false, message: 'PO not found' });
+      return res.status(404).json({ message: 'Purchase Order not found' });
     }
-    const approvalEntry = po.approvalChain.find(
-      a => a.approverId.toString() === req.user._id.toString() && a.status === 'pending'
+
+    // Find the current pending approval step for this user
+    const currentStepIndex = po.approvalChain.findIndex(
+      approval => approval.approver.toString() === req.user.id && 
+                  approval.status === 'pending'
     );
-    if (!approvalEntry) {
-      return res.status(403).json({ success: false, message: 'Not authorized to approve this PO' });
+
+    if (currentStepIndex === -1) {
+      return res.status(403).json({ 
+        message: 'You are not authorized to approve this PO at this stage' 
+      });
     }
-    approvalEntry.status = 'approved';
-    approvalEntry.comment = comment;
-    approvalEntry.actionAt = new Date();
-    const allApproved = po.approvalChain.every(a => a.status === 'approved');
-    if (allApproved) po.status = 'approved';
+
+    // Update the current approval step
+    po.approvalChain[currentStepIndex].status = 'approved';
+    po.approvalChain[currentStepIndex].approvedAt = Date.now();
+
+    // Check if this was the last approval
+    const allApproved = po.approvalChain.every(approval => approval.status === 'approved');
+    
+    if (allApproved) {
+      po.status = 'approved';
+    } else {
+      po.status = 'pending_approval';
+    }
+
     await po.save();
-    res.status(200).json({ success: true, po });
+
+    // Populate again for response
+    const updatedPO = await PurchaseOrder.findById(po._id)
+      .populate('vendorId', 'name')  // Change from 'vendor' to 'vendorId'
+      .populate('items.item', 'name')
+      .populate('approvalChain.approver', 'name email role');
+
+    res.json(updatedPO);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
