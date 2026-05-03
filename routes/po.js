@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { protect, authorize } = require('../middleware/auth');
 const {
   getPOs,
   getPO,
@@ -8,26 +9,16 @@ const {
   approvePO,
   rejectPO,
   fulfillPO,
-  cancelPO,
-  getStats
+  deletePO,
 } = require('../controllers/poController');
-const { protect, authorize } = require('../middleware/auth');
 
-router.use(protect);
+router.route('/').get(protect, getPOs).post(protect, authorize('admin', 'manager', 'superadmin'), createPO);
 
-router.get('/stats', getStats);
+router.route('/:id').get(protect, getPO).delete(protect, authorize('admin', 'superadmin'), deletePO);
 
-router.route('/')
-  .get(getPOs)
-  .post(authorize('admin', 'manager'), createPO);
-
-router.route('/:id')
-  .get(getPO)
-  .delete(authorize('admin', 'manager'), cancelPO);
-
-router.post('/:id/submit', authorize('admin', 'manager'), submitPO);
-router.post('/:id/approve', authorize('admin', 'approver'), approvePO);
-router.post('/:id/reject', authorize('admin', 'approver'), rejectPO);
-router.post('/:id/fulfill', authorize('admin', 'vendor'), fulfillPO);
+router.put('/:id/submit', protect, authorize('admin', 'manager', 'superadmin'), submitPO);
+router.put('/:id/approve', protect, authorize('admin', 'manager', 'approver', 'superadmin'), approvePO);
+router.put('/:id/reject', protect, authorize('admin', 'manager', 'approver', 'superadmin'), rejectPO);
+router.put('/:id/fulfill', protect, authorize('vendor', 'admin', 'superadmin'), fulfillPO);
 
 module.exports = router;
