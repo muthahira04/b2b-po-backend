@@ -81,14 +81,21 @@ const createPO = async (req, res) => {
     for (const entry of items) {
       const item = await Item.findById(entry.itemId);
       if (!item) return res.status(400).json({ success: false, message: `Item not found` });
-      const lineTotal = item.standardPrice * entry.quantity;
+
+      // FLAW 1 FIX: use unitPrice sent from frontend, not item.standardPrice
+      const unitPrice = Number(entry.unitPrice);
+      if (!unitPrice || unitPrice <= 0) {
+        return res.status(400).json({ success: false, message: `Invalid unit price for item: ${item.name}` });
+      }
+
+      const lineTotal = unitPrice * entry.quantity;
       totalAmount += lineTotal;
       resolvedItems.push({
         itemId: entry.itemId,
         name: item.name,
         quantity: entry.quantity,
         unit: item.unit,
-        unitPrice: item.standardPrice,
+        unitPrice: unitPrice,
         totalPrice: lineTotal,
       });
     }
