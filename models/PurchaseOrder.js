@@ -25,17 +25,25 @@ const PurchaseOrderSchema = new mongoose.Schema({
     name: String,
     quantity: Number,
     unit: String,
-    unitPrice: Number,
-    totalPrice: Number
+    unitPrice: { type: Number, default: 0 },
+    totalPrice: { type: Number, default: 0 },
+    // Quotation fields
+    vendorCanSupply: { type: Boolean, default: true },
+    vendorNote: { type: String, default: '' }
   }],
   totalAmount: {
     type: Number,
-    required: true
+    default: 0
+  },
+  department: {
+    type: String
   },
   status: {
     type: String,
     enum: [
       'draft',
+      'pending_quote',
+      'quoted',
       'pending_approval',
       'approved',
       'rejected',
@@ -80,7 +88,6 @@ const PurchaseOrderSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// Auto generate PO number before saving
 PurchaseOrderSchema.pre('save', async function(next) {
   if (!this.poNumber) {
     const count = await mongoose.model('PurchaseOrder').countDocuments();

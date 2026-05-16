@@ -4,19 +4,20 @@ const Item = require('../models/Item');
 const User = require('../models/User');
 const Company = require('../models/Company');
 
-const buildApprovalChain = async (totalAmount) => {
+// FLAW 2 FIX: companyId scoped
+const buildApprovalChain = async (totalAmount, companyId) => {
   const chain = [];
 
-  const admin = await User.findOne({ role: 'admin' }).select('_id name email');
+  const admin = await User.findOne({ role: 'admin', companyId }).select('_id name email');
   if (admin) chain.push({ approverId: admin._id, name: admin.name, role: 'admin', status: 'pending' });
 
   if (totalAmount > 1000) {
-    const manager = await User.findOne({ role: 'manager' }).select('_id name email');
+    const manager = await User.findOne({ role: 'manager', companyId }).select('_id name email');
     if (manager) chain.push({ approverId: manager._id, name: manager.name, role: 'manager', status: 'pending' });
   }
 
   if (totalAmount > 5000) {
-    const approvers = await User.find({ role: 'approver' }).select('_id name email').limit(2);
+    const approvers = await User.find({ role: 'approver', companyId }).select('_id name email').limit(2);
     approvers.forEach((a) =>
       chain.push({ approverId: a._id, name: a.name, role: 'approver', status: 'pending' })
     );
@@ -75,90 +76,159 @@ const createPO = async (req, res) => {
     if (!vendorId) return res.status(400).json({ success: false, message: 'Vendor is required' });
     if (!items || items.length === 0) return res.status(400).json({ success: false, message: 'At least one item is required' });
 
-    let totalAmount = 0;
+    // Items are saved with quantity and name only — no price yet (vendor will quote)
     const resolvedItems = [];
-
     for (const entry of items) {
       const item = await Item.findById(entry.itemId);
       if (!item) return res.status(400).json({ success: false, message: `Item not found` });
-
-      // FLAW 1 FIX: use unitPrice sent from frontend, not item.standardPrice
-      const unitPrice = Number(entry.unitPrice);
-      if (!unitPrice || unitPrice <= 0) {
-        return res.status(400).json({ success: false, message: `Invalid unit price for item: ${item.name}` });
-      }
-
-      const lineTotal = unitPrice * entry.quantity;
-      totalAmount += lineTotal;
       resolvedItems.push({
         itemId: entry.itemId,
         name: item.name,
         quantity: entry.quantity,
         unit: item.unit,
-        unitPrice: unitPrice,
-        totalPrice: lineTotal,
+        unitPrice: 0,
+        totalPrice: 0,
+        vendorCanSupply: true,
+        vendorNote: ''
       });
-    }
-
-    // Budget check
-    let budgetWarning = null;
-    let budgetExceeded = false;
-    if (department) {
-      const company = await Company.findOne();
-      if (company) {
-        const dept = company.departments.find(
-          (d) => d.name.toLowerCase() === department.toLowerCase()
-        );
-        if (dept) {
-          const remaining = dept.monthlyBudget - dept.spent;
-          if (totalAmount > remaining) {
-            budgetExceeded = true;
-            budgetWarning = {
-              department: dept.name,
-              monthlyBudget: dept.monthlyBudget,
-              spent: dept.spent,
-              remaining,
-              requested: totalAmount,
-              overage: totalAmount - remaining,
-            };
-          }
-        }
-      }
     }
 
     const po = await PurchaseOrder.create({
       companyId: req.user.companyId,
       vendorId,
       items: resolvedItems,
-      totalAmount,
+      totalAmount: 0,
       notes,
       expectedDelivery,
       deliveryAddress,
       department,
-      budgetExceeded,
+      budgetExceeded: false,
       status: 'draft',
       createdBy: req.user.id,
     });
 
-    res.status(201).json({ success: true, data: po, budgetWarning });
+    res.status(201).json({ success: true, data: po });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-const submitPO = async (req, res) => {
+// Buyer sends PO to vendor for quoting
+const sendForQuote = async (req, res) => {
   try {
     const po = await PurchaseOrder.findById(req.params.id);
     if (!po) return res.status(404).json({ success: false, message: 'PO not found' });
     if (po.status !== 'draft') {
-      return res.status(400).json({ success: false, message: 'Only draft POs can be submitted' });
+      return res.status(400).json({ success: false, message: 'Only draft POs can be sent for quote' });
     }
 
-    po.approvalChain = await buildApprovalChain(po.totalAmount);
-    po.status = 'pending_approval';
+    po.status = 'pending_quote';
     await po.save();
 
     res.json({ success: true, data: po });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Vendor submits their quote — price per line item + can/cannot supply
+const submitQuote = async (req, res) => {
+  try {
+    const po = await PurchaseOrder.findById(req.params.id);
+    if (!po) return res.status(404).json({ success: false, message: 'PO not found' });
+    if (po.status !== 'pending_quote') {
+      return res.status(400).json({ success: false, message: 'PO is not awaiting a quote' });
+    }
+
+    // Verify this vendor owns this PO
+    const vendor = await Vendor.findOne({ userId: req.user.id });
+    if (!vendor || po.vendorId.toString() !== vendor._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const { items } = req.body;
+    // items: [{ itemId, unitPrice, vendorCanSupply, vendorNote }]
+    if (!items || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Quote items are required' });
+    }
+
+    let totalAmount = 0;
+    po.items = po.items.map((existing) => {
+      const quoted = items.find((q) => q.itemId === existing.itemId.toString());
+      if (!quoted) return existing;
+
+      const canSupply = quoted.vendorCanSupply !== false;
+      const unitPrice = canSupply ? Number(quoted.unitPrice) || 0 : 0;
+      const totalPrice = canSupply ? unitPrice * existing.quantity : 0;
+      totalAmount += totalPrice;
+
+      return {
+        ...existing.toObject(),
+        unitPrice,
+        totalPrice,
+        vendorCanSupply: canSupply,
+        vendorNote: quoted.vendorNote || ''
+      };
+    });
+
+    po.totalAmount = totalAmount;
+    po.status = 'quoted';
+    await po.save();
+
+    res.json({ success: true, data: po });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Buyer reviews quoted PO and submits for internal approval
+const submitPO = async (req, res) => {
+  try {
+    const po = await PurchaseOrder.findById(req.params.id);
+    if (!po) return res.status(404).json({ success: false, message: 'PO not found' });
+
+    if (po.status !== 'quoted') {
+      return res.status(400).json({ success: false, message: 'PO must be quoted by vendor before submitting for approval' });
+    }
+
+    // Check if any items cannot be supplied
+    const unsupplied = po.items.filter((i) => !i.vendorCanSupply);
+    if (unsupplied.length === po.items.length) {
+      return res.status(400).json({ success: false, message: 'Vendor cannot supply any items on this PO. Please create a new PO with a different vendor.' });
+    }
+
+    // Budget check using companyId — FLAW 4 FIX
+    let budgetWarning = null;
+    let budgetExceeded = false;
+    if (po.department) {
+      const company = await Company.findById(po.companyId);
+      if (company) {
+        const dept = company.departments.find(
+          (d) => d.name.toLowerCase() === po.department.toLowerCase()
+        );
+        if (dept) {
+          const remaining = dept.monthlyBudget - dept.spent;
+          if (po.totalAmount > remaining) {
+            budgetExceeded = true;
+            budgetWarning = {
+              department: dept.name,
+              monthlyBudget: dept.monthlyBudget,
+              spent: dept.spent,
+              remaining,
+              requested: po.totalAmount,
+              overage: po.totalAmount - remaining,
+            };
+          }
+        }
+      }
+    }
+
+    po.budgetExceeded = budgetExceeded;
+    po.approvalChain = await buildApprovalChain(po.totalAmount, po.companyId);
+    po.status = 'pending_approval';
+    await po.save();
+
+    res.json({ success: true, data: po, budgetWarning });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -186,8 +256,9 @@ const approvePO = async (req, res) => {
     if (allApproved) {
       po.status = 'approved';
 
+      // FLAW 3 FIX: use Company.findById(po.companyId)
       if (po.department) {
-        const company = await Company.findOne();
+        const company = await Company.findById(po.companyId);
         if (company) {
           const dept = company.departments.find(
             (d) => d.name.toLowerCase() === po.department.toLowerCase()
@@ -282,4 +353,4 @@ const deletePO = async (req, res) => {
   }
 };
 
-module.exports = { getPOs, getPO, createPO, submitPO, approvePO, rejectPO, fulfillPO, deletePO };
+module.exports = { getPOs, getPO, createPO, sendForQuote, submitQuote, submitPO, approvePO, rejectPO, fulfillPO, deletePO };

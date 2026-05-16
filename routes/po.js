@@ -5,6 +5,8 @@ const {
   getPOs,
   getPO,
   createPO,
+  sendForQuote,
+  submitQuote,
   submitPO,
   approvePO,
   rejectPO,
@@ -16,6 +18,8 @@ router.route('/').get(protect, getPOs).post(protect, authorize('admin', 'manager
 
 router.route('/:id').get(protect, getPO).delete(protect, authorize('admin', 'superadmin'), deletePO);
 
+router.put('/:id/send-quote', protect, authorize('admin', 'manager', 'superadmin'), sendForQuote);
+router.put('/:id/submit-quote', protect, authorize('vendor'), submitQuote);
 router.put('/:id/submit', protect, authorize('admin', 'manager', 'superadmin'), submitPO);
 router.put('/:id/approve', protect, authorize('admin', 'manager', 'approver', 'superadmin'), approvePO);
 router.put('/:id/reject', protect, authorize('admin', 'manager', 'approver', 'superadmin'), rejectPO);

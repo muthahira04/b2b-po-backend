@@ -27,7 +27,7 @@ const register = async (req, res) => {
     res.status(201).json({
       success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, companyId: user.companyId }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -57,7 +57,8 @@ const login = async (req, res) => {
     res.status(200).json({
       success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      // FLAW 5 FIX: companyId added
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, companyId: user.companyId }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -76,15 +77,11 @@ const getMe = async (req, res) => {
   }
 };
 
-
-
 const setupCompany = async (req, res) => {
   try {
     const { name, email, phone, address } = req.body;
 
     const company = await Company.create({ name, email, phone, address });
-
-    // Link company to current user
     await User.findByIdAndUpdate(req.user._id, { companyId: company._id });
 
     res.status(201).json({ success: true, company });
