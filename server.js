@@ -14,7 +14,21 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.json({ message: 'B2B PO Management API is running' });
 });
-
+app.get('/api/debug/users', async (req, res) => {
+  const User = require('./models/User');
+  const users = await User.find({}, 'name email role companyId');
+  res.json(users);
+});
+app.get('/api/debug/users', async (req, res) => {
+  const User = require('./models/User');
+  const users = await User.find({}, 'name email role companyId');
+  res.json(users);
+});
+// Disable caching for all API responses
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/vendors', require('./routes/vendors'));
