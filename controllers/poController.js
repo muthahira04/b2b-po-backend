@@ -32,8 +32,11 @@ const getPOs = async (req, res) => {
 
     if (req.user.role === 'vendor') {
       const vendor = await Vendor.findOne({ userId: req.user.id });
-      if (!vendor) return res.json({ success: true, data: [] });
+      if (!vendor) return res.json({ success: true, count: 0, data: [] });
       filter.vendorId = vendor._id;
+    } else {
+      // All non-vendor roles: scope to their company only
+      filter.companyId = req.user.companyId;
     }
 
     const pos = await PurchaseOrder.find(filter)

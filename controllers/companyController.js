@@ -2,7 +2,7 @@ const Company = require('../models/Company');
 
 const getBudget = async (req, res) => {
   try {
-    const company = await Company.findOne();
+    const company = await Company.findById(req.user.companyId);
     if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
 
     const departments = company.departments.map((d) => ({
@@ -27,7 +27,7 @@ const upsertDepartment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'name and monthlyBudget are required' });
     }
 
-    const company = await Company.findOne();
+    const company = await Company.findById(req.user.companyId);
     if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
 
     const existing = company.departments.find(
@@ -49,7 +49,7 @@ const upsertDepartment = async (req, res) => {
 
 const deleteDepartment = async (req, res) => {
   try {
-    const company = await Company.findOne();
+    const company = await Company.findById(req.user.companyId);
     if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
 
     company.departments = company.departments.filter(
@@ -65,7 +65,7 @@ const deleteDepartment = async (req, res) => {
 
 const getCompany = async (req, res) => {
   try {
-    const company = await Company.findOne();
+    const company = await Company.findById(req.user.companyId);
     if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
     res.json({ success: true, data: company });
   } catch (err) {
