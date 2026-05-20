@@ -6,6 +6,6 @@ const { protect } = require('../middleware/auth');
 router.post('/register', register);
 router.post('/login', login);
 router.get('/me', protect, getMe);
-router.post('/setup', protect, setupCompany);
+router.post('/setup-company', setupCompany); // ← no protect, public endpoint
 
 module.exports = router;
